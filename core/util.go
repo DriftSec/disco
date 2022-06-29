@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/driftsec/wappalyzer"
-	"github.com/gocolly/colly"
 	"github.com/tj/go-spin"
 )
 
@@ -51,7 +49,7 @@ func parseExtFilters(in string) []string {
 		e = strings.Trim(e, ".")
 		ret = append(ret, e)
 	}
-	return ret
+	return Unique(ret)
 }
 
 func parseStatusFilters(in string) []int {
@@ -66,12 +64,25 @@ func parseStatusFilters(in string) []int {
 		ret = append(ret, eint)
 	}
 	ret = append(ret, 0)
-	return ret
+	return Uniqueint(ret)
+
 }
 
 func Unique(intSlice []string) []string {
 	keys := make(map[string]bool)
 	var list []string
+	for _, entry := range intSlice {
+		if _, value := keys[entry]; !value {
+			keys[entry] = true
+			list = append(list, entry)
+		}
+	}
+	return list
+}
+
+func Uniqueint(intSlice []int) []int {
+	keys := make(map[int]bool)
+	var list []int
 	for _, entry := range intSlice {
 		if _, value := keys[entry]; !value {
 			keys[entry] = true
@@ -200,31 +211,6 @@ func GetHostname(curl string) string {
 	return u.Hostname()
 }
 
-func CollyHeaders2Wapp(rh *colly.Response) wappalyzer.MapStrOrArray {
-	headers := make(wappalyzer.MapStrOrArray)
-	for k, v := range *rh.Headers {
-		lowerCaseKey := strings.ToLower(k)
-		headers[lowerCaseKey] = v
-	}
-	return headers
-}
-
-func CollyCookies2Wapp(rh *colly.Response) wappalyzer.MapStr {
-	headers := CollyHeaders2Wapp(rh)
-	cookies := make(wappalyzer.MapStr)
-	for _, cookie := range headers["set-cookie"] {
-		keyValues := strings.Split(cookie, ";")
-		for _, keyValueString := range keyValues {
-			keyValueSlice := strings.Split(keyValueString, "=")
-			if len(keyValueSlice) > 1 {
-				key, value := keyValueSlice[0], keyValueSlice[1]
-				cookies[key] = value
-			}
-		}
-	}
-	return cookies
-}
-
 func isMimeType(data string) bool {
 	mimes := []string{"application/x-www-form-urlencoded", "text/xml", "application/epub+zip", "application/gzip", "application/java-archive", "application/json", "application/ld+json", "application/msword", "application/octet-stream", "application/ogg", "application/pdf", "application/rtf", "application/vnd.amazon.ebook", "application/vnd.apple.installer+xml", "application/vnd.mozilla.xul+xml", "application/vnd.ms-excel", "application/vnd.ms-fontobject", "application/vnd.ms-powerpoint", "application/vnd.oasis.opendocument.presentation", "application/vnd.oasis.opendocument.spreadsheet", "application/vnd.oasis.opendocument.text", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.rar", "application/vnd.visio", "application/x-7z-compressed", "application/x-abiword", "application/x-bzip", "application/x-bzip2", "application/x-csh", "application/x-freearc", "application/xhtml+xml", "application/x-httpd-php", "application/xmlifnotreadablefromcasualusers", "application/x-sh", "application/x-shockwave-flash", "application/x-tar", "application/zip", "audio/aac", "audio/midiaudio/x-midi", "audio/mpeg", "audio/ogg", "audio/opus", "audio/wav", "audio/webm", "font/otf", "font/ttf", "font/woff", "font/woff2", "image/bmp", "image/gif", "image/jpeg", "image/png", "image/svg+xml", "image/tiff", "image/vnd.microsoft.icon", "image/webp", "text/calendar", "text/css", "text/csv", "text/html", "text/javascript", "text/plain", "text/xmlifreadablefromcasualusers", "video/3gpp", "video/3gpp2", "video/mp2t", "video/mpeg", "video/ogg", "video/webm", "video/x-msvideo"}
 	return ListContains(mimes, data)
@@ -260,4 +246,3 @@ func (s *Session) absoluteUrl(newPath string, curUrl string) string {
 
 	return newPath
 }
-

@@ -2,11 +2,14 @@ package core
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/fetch"
+	"github.com/chromedp/cdproto/inspector"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 )
 
@@ -44,6 +47,9 @@ func (r *RequestMap) get(rid network.RequestID) *network.Request {
 }
 
 func (s *Session) chromeTab(turl string) {
+	if turl == "" {
+		return
+	}
 	s.limiter <- true
 	ctx, cancel := chromedp.NewContext(*s.cdpCtx)
 	defer func() {
@@ -54,8 +60,8 @@ func (s *Session) chromeTab(turl string) {
 
 	var jslinks []string
 	var forms []string
-	s.createListenTargets(ctx)
-	_, err := chromedp.RunResponse(ctx, chromedp.Tasks{
+	s.createListenTargets(ctx, cancel)
+	err := chromedp.Run(ctx, chromedp.Tasks{
 		network.Enable(),
 		fetch.Enable(),
 		network.SetExtraHTTPHeaders(network.Headers(s.reqHeaders)),
@@ -69,7 +75,9 @@ func (s *Session) chromeTab(turl string) {
 	cancel()
 
 	if err != nil {
-		Eprint(err)
+		if !strings.Contains(err.Error(), "ERR_CONNECTION_ABORTED") {
+			Eprint(err, turl)
+		}
 		return
 	}
 
@@ -82,15 +90,26 @@ func (s *Session) chromeTab(turl string) {
 
 }
 
-func (s *Session) createListenTargets(ctx context.Context) {
-	chromedp.ListenTarget(ctx, func(ev interface{}) {
+func (s *Session) createListenTargets(tabCtx context.Context, tabCtxCancel context.CancelFunc) {
+	chromedp.ListenTarget(tabCtx, func(ev interface{}) {
 		switch ev := ev.(type) {
+		// cancel tabs if they crash
+		case *inspector.EventTargetCrashed:
+			tabCtxCancel()
+			// close alert boxes
+		case *page.EventJavascriptDialogOpening:
+			go func() {
+				if err := chromedp.Run(tabCtx,
+					page.HandleJavaScriptDialog(false),
+				); err != nil {
+					tabCtxCancel()
+				}
+			}()
+			// intercept requests for the scope check
 		case *fetch.EventRequestPaused:
 			go func() {
-				c := chromedp.FromContext(ctx)
-				ctx := cdp.WithExecutor(ctx, c.Target)
-
-				// TODO scope check goes here.
+				c := chromedp.FromContext(tabCtx)
+				ctx := cdp.WithExecutor(tabCtx, c.Target)
 				if !s.scopeOk(ev.Request.URL) {
 					Dprint("scope fail, skipping:", ev.Request.URL)
 					fetch.FailRequest(ev.RequestID, network.ErrorReasonConnectionAborted).Do(ctx)
@@ -98,7 +117,7 @@ func (s *Session) createListenTargets(ctx context.Context) {
 					fetch.ContinueRequest(ev.RequestID).Do(ctx)
 				}
 			}()
-
+			// catch responses and determine if we should report
 		case *network.EventResponseReceived:
 			request := s.rqMap.get(ev.RequestID)
 			if request != nil {
@@ -112,9 +131,9 @@ func (s *Session) createListenTargets(ctx context.Context) {
 			}
 
 			go func() {
-				c := chromedp.FromContext(ctx)
+				c := chromedp.FromContext(tabCtx)
 				rbp := network.GetResponseBody(ev.RequestID)
-				body, err := rbp.Do(cdp.WithExecutor(ctx, c.Target))
+				body, err := rbp.Do(cdp.WithExecutor(tabCtx, c.Target))
 				if err != nil {
 					return
 				}
@@ -131,7 +150,7 @@ func (s *Session) createListenTargets(ctx context.Context) {
 
 				}
 			}()
-
+			// catch requests, add req data to map so we can reference it later
 		case *network.EventRequestWillBeSent:
 			s.rqMap.add(ev.RequestID, ev.Request)
 			// if s.Dbg {

@@ -1,15 +1,22 @@
 package core
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
 	"net/url"
+	"os"
 	"regexp"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/desertbit/readline"
 )
+
+var Pause bool
 
 type Session struct {
 	rqMap         *RequestMap
@@ -30,6 +37,7 @@ type Session struct {
 	limiter       chan bool
 	Dbg           bool
 	urlFilter     string
+	// pause         bool
 }
 
 type SessionConfig struct {
@@ -90,10 +98,39 @@ func New(cfg *SessionConfig) *Session {
 	ret.cdpCtx = &ctx
 	ret.cdpCtxCancel = cancel
 	spn.Stop()
+	session2Grumble = ret
+	initInteractive()
 	return ret
 }
 
 func (s *Session) Start(targetUrl string) {
+	go func() {
+		tty, err := os.Open("/dev/tty")
+		rl, err := readline.New("> ")
+		rl.Config.Stdout = os.Stderr
+		if err != nil {
+			log.Fatal("failed to open tty")
+		}
+		defer tty.Close()
+		inreader := bufio.NewScanner(tty)
+		inreader.Split(bufio.ScanLines)
+		for inreader.Scan() {
+			instr := string(inreader.Bytes())
+			args := strings.Split(strings.TrimSpace(instr), " ")
+			os.Args = []string{}
+			if len(args) == 1 && args[0] == "" {
+				Pause = true
+				initInteractive()
+				err := app.RunWithReadline(rl)
+				if err != nil {
+					fmt.Println(err)
+				}
+				Pause = false
+
+			}
+		}
+	}()
+
 	u, err := url.Parse(targetUrl)
 	if err != nil {
 		log.Fatal("failed to parse the Url")
@@ -150,7 +187,14 @@ func (s *Session) scopeOk(turl string) bool {
 }
 
 func (s *Session) doVisit(turl string) {
-
+	if Pause {
+		for {
+			time.Sleep(time.Millisecond * 300)
+			if !Pause {
+				break
+			}
+		}
+	}
 	if turl == "" {
 		return
 	}
@@ -170,6 +214,14 @@ func (s *Session) doVisit(turl string) {
 }
 
 func (s *Session) shouldReport(u string, sc int) bool {
+	if Pause {
+		for {
+			time.Sleep(time.Millisecond * 300)
+			if !Pause {
+				break
+			}
+		}
+	}
 	u = NormalizeHost(u)
 
 	if GetHostname(u) != s.hostname {

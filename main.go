@@ -109,3 +109,4 @@ func main() {
 // TODO
 // js link find needs testing and work. lots of junk urls/extra requests.
 // need to deal with popups and alerts, they hang the process
+// may want to qsreplace and unique params.
